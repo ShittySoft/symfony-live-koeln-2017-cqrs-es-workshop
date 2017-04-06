@@ -15,6 +15,7 @@ use Building\Domain\DomainEvent\CheckInAnomalyDetected;
 use Building\Domain\DomainEvent\UserCheckedIn;
 use Building\Domain\DomainEvent\UserCheckedOut;
 use Building\Domain\Repository\BuildingRepositoryInterface;
+use Building\Domain\Finder\IsUserBlacklistedInterface;
 use Building\Infrastructure\Repository\BuildingRepository;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Driver\PDOSqlite\Driver;
@@ -206,11 +207,12 @@ return new ServiceManager([
         },
         Command\CheckInUser::class => function (ContainerInterface $container) : callable {
             $buildings = $container->get(BuildingRepositoryInterface::class);
+            $blacklist = $container->get(IsUserBlacklistedInterface::class);
 
-            return function (Command\CheckInUser $checkIn) use ($buildings) : void {
+            return function (Command\CheckInUser $checkIn) use ($buildings, $blacklist) : void {
                 $building = $buildings->get($checkIn->buildingId());
 
-                $building->checkInUser($checkIn->username());
+                $building->checkInUser($checkIn->username(), $blacklist);
 
                 $buildings->add($building);
             };
@@ -336,5 +338,14 @@ return new ServiceManager([
                 )
             );
         },
+        IsUserBlacklistedInterface::class => function () {
+            return new class implements IsUserBlacklistedInterface
+            {
+                public function __invoke(string $username) : bool
+                {
+                    return in_array($username, ['realDonaldTrump', 'osamaBinLaden'], true);
+                }
+            };
+        }
     ],
 ]);
