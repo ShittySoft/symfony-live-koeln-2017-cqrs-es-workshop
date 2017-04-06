@@ -11,6 +11,7 @@ use Bernard\QueueFactory;
 use Bernard\QueueFactory\PersistentFactory;
 use Building\Domain\Aggregate\Building;
 use Building\Domain\Command;
+use Building\Domain\DomainEvent\CheckInAnomalyDetected;
 use Building\Domain\DomainEvent\UserCheckedIn;
 use Building\Domain\DomainEvent\UserCheckedOut;
 use Building\Domain\Repository\BuildingRepositoryInterface;
@@ -224,6 +225,23 @@ return new ServiceManager([
 
                 $buildings->add($building);
             };
+        },
+        Command\NotifySecurityOfAnomaly::class => function () : callable {
+            return function (Command\NotifySecurityOfAnomaly $notify) {
+                error_log(sprintf('Yo, somebody is being fishy: %s %s', $notify->username(), $notify->buildingId()->toString()));
+            };
+        },
+        CheckInAnomalyDetected::class . '-listeners' => function (ContainerInterface $container) : array {
+            $commandBus = $container->get(CommandBus::class);
+
+            return [
+                function (CheckInAnomalyDetected $anomaly) use ($commandBus) {
+                    $commandBus->dispatch(Command\NotifySecurityOfAnomaly::fromBuildingAndUsername(
+                        $anomaly->buildingId(),
+                        $anomaly->username()
+                    ));
+                },
+            ];
         },
         UserCheckedIn::class . '-projectors' => function (ContainerInterface $container) : array {
             $eventStore = $container->get(EventStore::class);
