@@ -11,6 +11,8 @@ use Bernard\QueueFactory;
 use Bernard\QueueFactory\PersistentFactory;
 use Building\Domain\Aggregate\Building;
 use Building\Domain\Command;
+use Building\Domain\DomainEvent\UserCheckedIn;
+use Building\Domain\DomainEvent\UserCheckedOut;
 use Building\Domain\Repository\BuildingRepositoryInterface;
 use Building\Infrastructure\Repository\BuildingRepository;
 use Doctrine\DBAL\Connection;
@@ -24,6 +26,7 @@ use Prooph\Common\Event\ActionEventListenerAggregate;
 use Prooph\Common\Event\ProophActionEventEmitter;
 use Prooph\Common\Messaging\FQCNMessageFactory;
 use Prooph\Common\Messaging\NoOpMessageConverter;
+use Prooph\EventSourcing\AggregateChanged;
 use Prooph\EventSourcing\EventStoreIntegration\AggregateTranslator;
 use Prooph\EventStore\Adapter\Doctrine\DoctrineEventStoreAdapter;
 use Prooph\EventStore\Adapter\Doctrine\Schema\EventStoreSchema;
@@ -31,6 +34,7 @@ use Prooph\EventStore\Adapter\PayloadSerializer\JsonPayloadSerializer;
 use Prooph\EventStore\Aggregate\AggregateRepository;
 use Prooph\EventStore\Aggregate\AggregateType;
 use Prooph\EventStore\EventStore;
+use Prooph\EventStore\Stream\StreamName;
 use Prooph\EventStoreBusBridge\EventPublisher;
 use Prooph\EventStoreBusBridge\TransactionManager;
 use Prooph\ServiceBus\Async\MessageProducer;
@@ -220,6 +224,46 @@ return new ServiceManager([
 
                 $buildings->add($building);
             };
+        },
+        UserCheckedIn::class . '-projectors' => function (ContainerInterface $container) : array {
+            $eventStore = $container->get(EventStore::class);
+
+            return [
+                // naive solution following:
+                function (UserCheckedIn $event) {
+                    // produce state...
+                    $file = __DIR__ . '/public/naive-' . $event->aggregateId() . '.json';
+
+                    $users = [];
+
+                    if (is_file($file)) {
+                        $users = json_decode(file_get_contents($file), true);
+                    }
+
+                    file_put_contents($file, json_encode(array_values(array_unique(array_merge($users, [$event->username()])))));
+                },
+                // proper solution
+                function (AggregateChanged $event) use ($eventStore) {
+                    $users = [];
+
+                    $events = $eventStore->loadEventsByMetadataFrom(
+                        new StreamName('event_stream'),
+                        ['aggregate_id' => $event->aggregateId()]
+                    );
+
+                    foreach ($events as $replayedEvent) {
+                        if ($replayedEvent instanceof UserCheckedIn) {
+                            $users[$replayedEvent->username()] = null;
+                        }
+
+                        if ($replayedEvent instanceof UserCheckedOut) {
+                            unset($users[$replayedEvent->username()]);
+                        }
+                    }
+
+                    file_put_contents(__DIR__ . '/public/proper-' . $event->aggregateId() . '.json', json_encode(array_keys($users)));
+                },
+            ];
         },
         BuildingRepositoryInterface::class => function (ContainerInterface $container) : BuildingRepositoryInterface {
             return new BuildingRepository(
