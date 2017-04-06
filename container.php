@@ -270,7 +270,7 @@ return new ServiceManager([
 
             return [
                 // naive solution following:
-                function (UserCheckedIn $event) {
+                function (UserCheckedOut $event) {
                     // produce state...
                     $file = __DIR__ . '/public/naive-' . $event->aggregateId() . '.json';
 
