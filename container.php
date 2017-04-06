@@ -265,6 +265,50 @@ return new ServiceManager([
                 },
             ];
         },
+        UserCheckedOut::class . '-projectors' => function (ContainerInterface $container) : array {
+            $eventStore = $container->get(EventStore::class);
+
+            return [
+                // naive solution following:
+                function (UserCheckedIn $event) {
+                    // produce state...
+                    $file = __DIR__ . '/public/naive-' . $event->aggregateId() . '.json';
+
+                    $users = [];
+
+                    if (is_file($file)) {
+                        $users = json_decode(file_get_contents($file), true);
+                    }
+
+                    $usersByName = array_flip($users);
+                    unset($usersByName[$event->username()]);
+
+                    file_put_contents($file, json_encode(array_keys($usersByName)));
+                },
+                // proper solution - duplicate of what we have in the UserCheckedIn listener
+                // can be extracted to a service/class
+                function (AggregateChanged $event) use ($eventStore) {
+                    $users = [];
+
+                    $events = $eventStore->loadEventsByMetadataFrom(
+                        new StreamName('event_stream'),
+                        ['aggregate_id' => $event->aggregateId()]
+                    );
+
+                    foreach ($events as $replayedEvent) {
+                        if ($replayedEvent instanceof UserCheckedIn) {
+                            $users[$replayedEvent->username()] = null;
+                        }
+
+                        if ($replayedEvent instanceof UserCheckedOut) {
+                            unset($users[$replayedEvent->username()]);
+                        }
+                    }
+
+                    file_put_contents(__DIR__ . '/public/proper-' . $event->aggregateId() . '.json', json_encode(array_keys($users)));
+                },
+            ];
+        },
         BuildingRepositoryInterface::class => function (ContainerInterface $container) : BuildingRepositoryInterface {
             return new BuildingRepository(
                 new AggregateRepository(
