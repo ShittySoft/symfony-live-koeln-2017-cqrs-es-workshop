@@ -143,7 +143,7 @@ return new ServiceManager([
             return $eventStore;
         },
 
-        CommandBus::class                  => function (ContainerInterface $container) : CommandBus {
+        'immediate-command-bus'                  => function (ContainerInterface $container) : CommandBus {
             $commandBus = new CommandBus();
 
             $commandBus->utilize(new ServiceLocatorPlugin($container));
@@ -172,7 +172,50 @@ return new ServiceManager([
 
             $commandBus->utilize($transactionManager);
 
-            return $commandBus;
+            return new class ($commandBus) extends CommandBus {
+                /**
+                 * @var CommandBus
+                 */
+                private $commandBus;
+
+                public function __construct(CommandBus $commandBus)
+                {
+                    $this->commandBus = $commandBus;
+                }
+
+                public function dispatch($command)
+                {
+                    var_dump($command);
+
+                    $this->commandBus->dispatch($command);
+                }
+            };
+        },
+        CommandBus::class => function (ContainerInterface $container) : CommandBus {
+            $messageProducer = $container->get(MessageProducer::class);
+            $commandBus = $container->get('immediate-command-bus');
+
+            return new class ($messageProducer, $commandBus) extends CommandBus
+            {
+                private $messageProducer;
+                private $immediate;
+                public function __construct(MessageProducer $messageProducer, CommandBus $immediate)
+                {
+                    $this->messageProducer = $messageProducer;
+                    $this->immediate = $immediate;
+                }
+
+                public function dispatch($command)
+                {
+                    if ($command instanceof Command\RegisterNewBuilding) {
+                        $this->immediate->dispatch($command);
+
+                        return;
+                    }
+
+                    $this->messageProducer->__invoke($command);
+                }
+            };
         },
 
         // ignore this - this is async stuff
